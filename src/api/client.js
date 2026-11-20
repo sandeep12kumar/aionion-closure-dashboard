@@ -4,8 +4,22 @@ export const UNAUTHORIZED_EVENT = 'dash:unauthorized';
 
 const http = axios.create({ baseURL: '/api', withCredentials: true, timeout: 60_000 });
 
+/** The API always answers JSON. An HTML page means the hosting's /api rewrite is missing or wrong. */
+const NOT_CONNECTED = 'The dashboard API is not connected: /api returned the web page instead of the API. '
+  + 'Check the Amplify rewrite "/api/<*>" (it must be the first rule and point to the dashboard API Gateway URL).';
+
 http.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    const type = String(response.headers?.['content-type'] || '');
+    const looksHtml = type.includes('text/html') || (typeof response.data === 'string' && /^\s*<(!doctype|html)/i.test(response.data));
+    if (looksHtml && response.config?.responseType !== 'blob') {
+      return Promise.reject(Object.assign(new Error('API not connected'), {
+        config: response.config,
+        response: { status: 502, data: { success: false, code: 'API_NOT_CONNECTED', message: NOT_CONNECTED } },
+      }));
+    }
+    return response;
+  },
   (error) => {
     const url = error.config?.url || '';
     if (error.response?.status === 401 && !url.includes('/auth/')) {
